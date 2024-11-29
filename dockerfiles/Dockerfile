@@ -15,6 +15,8 @@
 # Set this to the current release version: it gets done so as part of the release.
 ARG RELEASE_VERSION=3.2.3
 
+ARG OPENSSL_VERSION=3.4.0
+
 # For multi-arch builds - assumption is running on an AMD64 host
 FROM multiarch/qemu-user-static:x86_64-arm AS qemu-arm32
 FROM multiarch/qemu-user-static:x86_64-aarch64 AS qemu-arm64
@@ -34,12 +36,15 @@ RUN mkdir -p /fluent-bit/bin /fluent-bit/etc /fluent-bit/log
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+ARG OPENSSL_VERSION
+
 # hadolint ignore=DL3008
 RUN echo "deb http://deb.debian.org/debian bookworm-backports main" >> /etc/apt/sources.list && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
     build-essential \
     curl \
+    wget \
     ca-certificates \
     cmake \
     git \
@@ -57,6 +62,26 @@ RUN echo "deb http://deb.debian.org/debian bookworm-backports main" >> /etc/apt/
     libyaml-dev \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
+
+ARG OPENSSL_SRC_DIR=/usr/local/src/openssl
+ARG OPENSSL_CONF_FILE=/usr/local/ssl/openssl.cnf
+
+COPY conf/fips_openssl.cnf /tmp
+
+# OpenSSL build
+RUN mkdir -p ${OPENSSL_SRC_DIR}  && \
+    cd ${OPENSSL_SRC_DIR} && \
+    wget https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz && \
+    tar -xzvf openssl-${OPENSSL_VERSION}.tar.gz && \
+    apt-get remove -y openssl libssl-dev && \
+    apt-get autoremove -y && \
+    cd ${OPENSSL_SRC_DIR}/openssl-${OPENSSL_VERSION} && \
+    ./config enable-fips && \
+    make && \
+    make install && \
+    cat /tmp/fips_openssl.cnf >> ${OPENSSL_CONF_FILE}
+
+ENV PATH=/usr/local/bin:$PATH
 
 # Must be run from root of repo
 WORKDIR /src/fluent-bit/
@@ -78,6 +103,7 @@ RUN cmake -DFLB_RELEASE=On \
     -DFLB_NIGHTLY_BUILD="$FLB_NIGHTLY_BUILD" \
     -DFLB_LOG_NO_CONTROL_CHARS=On \
     -DFLB_CHUNK_TRACE="$FLB_CHUNK_TRACE" \
+    -DOPENSSL_ROOT_DIR="/usr/local" \
     ..
 
 RUN make -j "$(getconf _NPROCESSORS_ONLN)"
@@ -178,6 +204,13 @@ COPY --from=deb-extractor /dpkg /
 # Copy certificates
 COPY --from=builder /etc/ssl/certs /etc/ssl/certs
 
+# Copy FIPS version of OpenSSL
+COPY --from=builder /usr/local/ssl /usr/local/ssl
+COPY --from=builder /usr/local/bin/openssl /usr/local/bin/openssl
+COPY --from=builder /usr/local/lib* /
+
+ENV PATH=/usr/local/bin:$PATH
+
 # Finally the binaries as most likely to change
 COPY --from=builder /fluent-bit /fluent-bit
 
@@ -226,7 +259,6 @@ RUN echo "deb http://deb.debian.org/debian bookworm-backports main" >> /etc/apt/
     dnsutils iputils-ping iputils-arping iputils-tracepath iputils-clockdiff \
     tcpdump curl nmap tcpflow iftop \
     net-tools mtr netcat-openbsd bridge-utils iperf ngrep \
-    openssl \
     htop atop strace iotop sysstat ncdu logrotate hdparm pciutils psmisc tree pv \
     cmake make tar flex bison \
     libssl-dev libsasl2-dev libsystemd-dev/bookworm-backports zlib1g-dev libpq-dev libyaml-dev postgresql-server-dev-all \
@@ -234,6 +266,17 @@ RUN echo "deb http://deb.debian.org/debian bookworm-backports main" >> /etc/apt/
     && rm -rf /var/lib/apt/lists/*
 
 RUN rm -f /usr/bin/qemu-*-static
+
+# Remove old version of OpenSSL
+RUN apt-get remove -y openssl libssl-dev && apt-get autoremove -y
+
+# Copy FIPS version of OpenSSL
+COPY --from=builder /usr/local/ssl /usr/local/ssl
+COPY --from=builder /usr/local/bin/openssl /usr/local/bin/openssl
+COPY --from=builder /usr/local/lib* /
+
+ENV PATH=/usr/local/bin:$PATH
+
 COPY --from=builder /fluent-bit /fluent-bit
 
 EXPOSE 2020
