@@ -1,0 +1,51 @@
+---
+version: '2'
+services:
+
+  broker:
+    image: confluentinc/confluent-local:latest
+    hostname: broker
+    container_name: broker
+    ports:
+      - "9092:9092"
+      - "8082:8082"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,SSL:SSL'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://broker:29092,SSL://localhost:9092'
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_PROCESS_ROLES: 'broker,controller'
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@broker:29093'
+      KAFKA_LISTENERS: 'PLAINTEXT://broker:29092,CONTROLLER://broker:29093,SSL://0.0.0.0:9092'
+      KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
+      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+      KAFKA_LOG_DIRS: '/tmp/kraft-combined-logs'
+      KAFKA_REST_HOST_NAME: rest-proxy
+      KAFKA_REST_BOOTSTRAP_SERVERS: 'broker:29092'
+      KAFKA_REST_LISTENERS: "http://0.0.0.0:8082"
+      CLUSTER_ID: '4L6g3nShT-eMCtK--X86sw'
+      KAFKA_LOG4J_LOGGERS: "kafka.controller=INFO,kafka.producer.async.DefaultEventHandler=INFO,state.change.logger=INFO"
+      KAFKA_SECURITY_PROTOCOL: SSL
+      # if this is not set any client will be able to bi-pass SSL authentication
+      KAFKA_SSL_CLIENT_AUTH: required
+      # the key in the client & server key store must be signed by the same root CA
+      KAFKA_SSL_KEYSTORE_FILENAME: kafka.server.keystore.jks
+      KAFKA_SSL_KEYSTORE_CREDENTIALS: kafka.keystore.creds
+      KAFKA_SSL_KEY_CREDENTIALS: kafka.keystore.creds
+      # the server truststore will allow any client truststore signed with the same root CA to authenticate against the sever truststore
+      KAFKA_SSL_TRUSTSTORE_FILENAME: kafka.server.truststore.jks
+      KAFKA_SSL_TRUSTSTORE_CREDENTIALS: kafka.truststore.creds
+      KAFKA_SSL_ENDPOINT_IDENTIFICATION_ALGORITHM: " "
+      # to prevent any authenticated principle access we must enable ACLs
+      # the principle (CN name of the key) is authorised
+      KAFKA_SUPER_USERS: 'User:CN=client1'
+    volumes:
+      - ./secrets:/etc/kafka/secrets
+  fluent-bit:
+    build: .
+    volumes:
+      - ./fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf
+      - ./secrets:/secrets
